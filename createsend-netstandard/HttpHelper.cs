@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.IO;
 using createsend_dotnet.Transactional;
+using System.Linq;
 
 #if SUPPORTED_FRAMEWORK_VERSION
 using createsend_dotnet.Transactional;
@@ -214,21 +215,19 @@ namespace createsend_dotnet
                     {
                         using (var sr = new System.IO.StreamReader(resp))
                         {
-#if SUPPORTED_FRAMEWORK_VERSION
                             var type = typeof(U);
-                            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(RateLimited<>))
+                            if (type.GetGenericTypeDefinition() == typeof(RateLimited<>))
                             {
-                                var responseType = type.GetGenericArguments()[0];
-                                var response = JsonConvert.DeserializeObject(sr.ReadToEnd().Trim(), responseType, serialiserSettings);
+                                var responseType = type.GenericTypeArguments[0];
+                                var result = JsonConvert.DeserializeObject(sr.ReadToEnd().Trim(), responseType, serialiserSettings);
                                 var status = new RateLimitStatus
-                                    {
-                                        Credit = resp.Headers["X-RateLimit-Limit"].UInt(0),
-                                        Remaining = resp.Headers["X-RateLimit-Remaining"].UInt(0),
-                                        Reset = resp.Headers["X-RateLimit-Reset"].UInt(0)
-                                    };
-                                return (U)Activator.CreateInstance(type, response, status);
+                                {
+                                    Credit = response.Headers.Contains("X-RateLimit-Limit") ? uint.Parse(response.Headers.GetValues("X-RateLimit-Limit").First()) : 0,
+                                    Remaining = response.Headers.Contains("X-RateLimit-Remaining") ? uint.Parse(response.Headers.GetValues("X-RateLimit-Remaining").First()) : 0,
+                                    Reset = response.Headers.Contains("X-RateLimit-Reset") ? uint.Parse(response.Headers.GetValues("X-RateLimit-Reset").First()) : 0
+                                };
+                                return (U)Activator.CreateInstance(type, result, status);
                             }
-#endif
                             return JsonConvert.DeserializeObject<U>(sr.ReadToEnd().Trim(), serialiserSettings);
                         }
                     }
@@ -305,12 +304,17 @@ namespace createsend_dotnet
                 return url;
             }
 
+            Dictionary<string, string> queryValues = new Dictionary<string, string>();
+
             foreach (string key in nvc)
             {
-                url += Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(url, key, nvc[key]);
+                if (!string.IsNullOrWhiteSpace(nvc[key]))
+                {
+                    queryValues.Add(key, nvc[key]);
+                }
             }
 
-            return url;
+            return Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(url, queryValues);
         }
     }
 }
